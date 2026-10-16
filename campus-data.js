@@ -62,43 +62,6 @@ const campusData = {
                 description: "A facility that houses computer laboratories, classrooms, and faculty offices for technology-based learning, practical training, and computing-related programs.",
                 photo: "images/department/ccit/jpg/1.jpg",
                 image: "images/department/ccit/jpg/1.jpg",
-                tourPhotos: [
-                    {
-                        floor: "1st Floor",
-                        spots: [
-                            { label: "First Floor", src: "images/department/ccit/png/ccit-floor1.png" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor2.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor3.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor4.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor5.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor6.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor7.jpg" },
-                            { label: "First Floor", src: "images/department/ccit/jpg/ccit-floor8.jpg" },           
-                        ]
-                    },
-                    {
-                        floor: "2nd Floor",
-                        spots: [
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.1.jpg" },
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.2.jpg" },
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.3.jpg" },
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.4.jpg" },
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.5.jpg" },
-                            { label: "Second Floor", src: "images/department/ccit/jpg/ccit-floor2.6.jpg" },
-                        ]
-                    },
-                    {
-                        floor: "3rd Floor",
-                        spots: [
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.1.jpg" },
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.2.jpg" },
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.3.jpg" },
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.4.jpg" },
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.5.jpg" },
-                            { label: "Third Floor", src: "images/department/ccit/jpg/ccit-floor3.6.jpg" },
-                        ]
-                    }
-                ],
                 rooms: [                 
                     { id: 101, name: "SBO Office", coords: [15.31758, 119.98223 ], floor: "Ground Floor", iconOffset: [0, 0] },  
                     { id: 102, name: "CCIT Room 5", coords: [15.31754, 119.98227], floor: "Ground Floor", iconOffset: [0, 0], instructor: "Mr. Joseph J. Juliano" },

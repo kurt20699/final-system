@@ -1248,11 +1248,9 @@ function logoutUser() {
     const sidebar = document.getElementById('sidebarPanel') ?? document.getElementById('sidebar');
     if (sidebar) sidebar.classList.remove('open', 'active');
 
-    // Close building panel, location modal, virtual tour if any were open
+    // Close building panel and location modal if any were open
     document.getElementById('buildingPanel')?.classList.remove('active', 'open');
     document.getElementById('locationModal')?.classList.remove('active');
-    const virtualTourModal = document.getElementById('virtualTourModal');
-    if (virtualTourModal) virtualTourModal.remove();
 
     updateUserRoleBadge();
     switchAuthTab('login');
@@ -2044,7 +2042,6 @@ try {
             labelOffset: existing?.labelOffset || [0, 0],
             image: existing?.image || null,
             photo: existing?.photo || null,   // ← ADD — populateBuildingPanel() filters on this field specifically
-            tourPhotos: existing?.tourPhotos || [],
             description: dbB.description || existing?.description || null,
             footprint: Array.isArray(dbB.footprint) && dbB.footprint.length >= 3 ? dbB.footprint : (existing?.footprint || null),
             footprintHeight: dbB.footprint_height != null ? Number(dbB.footprint_height) : (existing?.footprintHeight ?? 4),
@@ -4123,32 +4120,11 @@ function showLocationDetails(location) {
             `;
         }
     }
-
-    // ✅ Virtual Tour button — only shows for buildings with tourPhotos
-    const tourBtn = location.tourPhotos && location.tourPhotos.length > 0
-        ? `<button onclick="openVirtualTour('${location.name}')" style="
-            width: 100%;
-            margin-top: 8px;
-            padding: 10px;
-            background: linear-gradient(135deg, #2c5aa0, #6c63ff);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        ">🏛️ Virtual Tour</button>`
-        : '';
     
     const details = `
         <p><strong>Type:</strong> ${location.type.charAt(0).toUpperCase() + location.type.slice(1)}</p>
         ${location.description ? `<p><strong>Description:</strong> ${location.description}</p>` : ''}
         ${roomsList}
-        ${tourBtn}
     `;
     
     document.getElementById('locationDetails').innerHTML = details;
@@ -4164,427 +4140,6 @@ function showLocationDetails(location) {
     }
 
     modal.classList.add('active');
-}
-
-function openVirtualTour(buildingName) {
-    const campus = campusData[state.currentCampus];
-    const building = campus.locations.find(l => l.name === buildingName);
-    if (!building || !building.tourPhotos) return;
-
-    const existing = document.getElementById('virtualTourModal');
-    if (existing) existing.remove();
-
-    const floors = building.tourPhotos;
-
-    const modal = document.createElement('div');
-    modal.id = 'virtualTourModal';
-    modal.className = 'virtual-tour-modal';
-    modal.dataset.building = buildingName;
-    modal.dataset.floorIndex = '0';
-    modal.dataset.spotIndex = '0';
-    modal.style.cssText = `
-        position: fixed;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        background: rgba(0,0,0,0.97);
-        z-index: 99999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-    `;
-
-    modal.innerHTML = `
-        <div class="virtual-tour-shell">
-
-            <!-- Header -->
-            <div class="virtual-tour-header">
-                <h2 class="virtual-tour-title">🏛️ ${buildingName} — Virtual Tour</h2>
-                <button class="virtual-tour-exit-btn" type="button">Exit Tour</button>
-            </div>
-
-            <!-- Floor Tabs -->
-            <div id="floorTabs" style="display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
-                ${floors.map((f, i) => `
-                    <button onclick="switchFloor(${i})" id="floorTab_${i}" style="
-                        padding: 8px 20px;
-                        border-radius: 20px;
-                        border: 2px solid ${i === 0 ? '#6c63ff' : 'rgba(255,255,255,0.3)'};
-                        background: ${i === 0 ? '#6c63ff' : 'transparent'};
-                        color: white;
-                        font-weight: 600;
-                        font-size: 13px;
-                        cursor: pointer;
-                        transition: all 0.2s;
-                    ">${f.floor}</button>
-                `).join('')}
-            </div>
-
-            <!-- Panorama Wrapper -->
-            <div class="virtual-tour-panorama" style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #111;">
-
-                <button class="virtual-tour-exit-fab" type="button" aria-label="Exit virtual tour">Exit</button>
-
-                <!-- Fade overlay for transitions -->
-                <div id="tourFade" style="
-                    position: absolute;
-                    inset: 0;
-                    background: black;
-                    opacity: 0;
-                    z-index: 5;
-                    pointer-events: none;
-                    transition: opacity 0.35s ease;
-                    border-radius: 12px;
-                "></div>
-
-                <!-- Pannellum container -->
-                <div id="panoramaContainer" style="
-                    width: 100%;
-                    height: 100%;
-                    border-radius: 12px;
-                "></div>
-
-                <!-- Back Arrow -->
-                <div id="arrowBack" onclick="moveSpot(-1)" style="
-                    position: absolute;
-                    left: 50%;
-                    bottom: 80px;
-                    transform: translateX(-50%) translateX(-60px) rotate(270deg);
-                    width: 64px;
-                    height: 64px;
-                    border-radius: 50%;
-                    background: rgba(255,255,255,0.25);
-                    backdrop-filter: blur(4px);
-                    cursor: pointer;
-                    z-index: 10;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: background 0.2s, transform 0.2s, opacity 0.3s;
-                    border: 2px solid rgba(255,255,255,0.4);
-                " onmouseover="this.style.background='rgba(255,255,255,0.45)'"
-                onmouseout="this.style.background='rgba(255,255,255,0.25)'">
-                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                        <polyline points="7,18 14,10 21,18" stroke="white" stroke-width="3.5"
-                            stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-
-                <!-- Forward Arrow -->
-                <div id="arrowForward" onclick="moveSpot(1)" style="
-                    position: absolute;
-                    left: 50%;
-                    bottom: 80px;
-                    transform: translateX(-50%) translateX(60px);
-                    width: 64px;
-                    height: 64px;
-                    border-radius: 50%;
-                    background: rgba(255,255,255,0.25);
-                    backdrop-filter: blur(4px);
-                    cursor: pointer;
-                    z-index: 10;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: background 0.2s, transform 0.2s, opacity 0.3s;
-                    border: 2px solid rgba(255,255,255,0.4);
-                " onmouseover="this.style.background='rgba(255,255,255,0.45)'"
-                    onmouseout="this.style.background='rgba(255,255,255,0.25)'">
-                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                        <polyline points="7,18 14,10 21,18" stroke="white" stroke-width="3.5"
-                            stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </div>
-
-                <!-- Dot Indicator (bottom right) -->
-                <div id="miniMap" style="
-                    position: absolute;
-                    bottom: 16px;
-                    right: 16px;
-                    background: rgba(0,0,0,0.65);
-                    border: 2px solid rgba(255,255,255,0.3);
-                    border-radius: 12px;
-                    padding: 10px 14px;
-                    z-index: 10;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    gap: 8px;
-                    min-width: 120px;
-                ">
-                    <!-- Floor label -->
-                    <div id="miniMapLabel" style="
-                        color: rgba(255,255,255,0.6);
-                        font-size: 11px;
-                        font-weight: 600;
-                        letter-spacing: 0.5px;
-                        text-transform: uppercase;
-                    ">${floors[0].floor}</div>
-
-                    <!-- Dot trail -->
-                    <div id="miniMapDots" style="
-                        display: flex;
-                        gap: 6px;
-                        align-items: center;
-                        justify-content: center;
-                        flex-wrap: wrap;
-                        max-width: 100px;
-                    ">
-                        ${floors[0].spots.map((s, i) => `
-                            <div id="miniDot_${i}" title="${s.label}" style="
-                                width: ${i === 0 ? '12px' : '8px'};
-                                height: ${i === 0 ? '12px' : '8px'};
-                                border-radius: 50%;
-                                background: ${i === 0 ? '#6c63ff' : 'rgba(255,255,255,0.25)'};
-                                border: ${i === 0 ? '2px solid white' : '1px solid rgba(255,255,255,0.3)'};
-                                transition: all 0.3s ease;
-                                cursor: pointer;
-                                box-shadow: ${i === 0 ? '0 0 0 4px rgba(108,99,255,0.3)' : 'none'};
-                            " onclick="goToSpot(${i})"></div>
-                        `).join('')}
-                    </div>
-
-                    <!-- Current spot name -->
-                    <div id="miniMapSpotName" style="
-                        color: white;
-                        font-size: 11px;
-                        font-weight: 500;
-                        text-align: center;
-                        max-width: 100px;
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
-                    ">${floors[0].spots[0].label}</div>
-                </div>
-
-            </div>
-
-            <!-- Spot label + dots -->
-            <div style="display:flex; justify-content:center; align-items:center; gap:16px; margin-top:10px;">
-                <p id="spotLabel" style="color:rgba(255,255,255,0.7); font-size:13px; margin:0;">
-                    📍 <strong style="color:white;">${floors[0].spots[0].label}</strong>
-                </p>
-                <p id="spotCounter" style="color:rgba(255,255,255,0.4); font-size:12px; margin:0;">
-                    1 / ${floors[0].spots.length}
-                </p>
-            </div>
-
-            <!-- Dot indicators -->
-            <div id="spotDots" style="display:flex; justify-content:center; gap:8px; margin-top:8px;">
-                ${floors[0].spots.map((_, i) => `
-                    <div id="dot_${i}" onclick="goToSpot(${i})" style="
-                        width: 8px; height: 8px;
-                        border-radius: 50%;
-                        background: ${i === 0 ? '#6c63ff' : 'rgba(255,255,255,0.3)'};
-                        cursor: pointer;
-                        transition: background 0.2s;
-                    "></div>
-                `).join('')}
-            </div>
-
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const exitButtons = modal.querySelectorAll('.virtual-tour-exit-btn, .virtual-tour-exit-fab');
-    exitButtons.forEach(btn => btn.addEventListener('click', closeVirtualTour));
-
-    modal.addEventListener('click', e => {
-        if (e.target === modal) closeVirtualTour();
-    });
-
-    document._tourKeyHandler = e => {
-        if (e.key === 'ArrowRight') moveSpot(1);
-        if (e.key === 'ArrowLeft')  moveSpot(-1);
-        if (e.key === 'Escape')     closeVirtualTour();
-    };
-    document.addEventListener('keydown', document._tourKeyHandler);
-
-    loadPanorama(floors[0].spots[0].src, false);
-    updateArrows(0, floors[0].spots.length);
-}
-
-function updateMiniMap(floorIndex, spotIndex, building) {
-    const floor = building.tourPhotos[floorIndex];
-    const spot = floor.spots[spotIndex];
-
-    const label = document.getElementById('miniMapLabel');
-    if (label) label.textContent = floor.floor;
-
-    const spotName = document.getElementById('miniMapSpotName');
-    if (spotName) spotName.textContent = spot.label;
-
-    const dotsContainer = document.getElementById('miniMapDots');
-    if (dotsContainer) {
-        dotsContainer.innerHTML = floor.spots.map((s, i) => `
-            <div id="miniDot_${i}" title="${s.label}" style="
-                width: ${i === spotIndex ? '12px' : '8px'};
-                height: ${i === spotIndex ? '12px' : '8px'};
-                border-radius: 50%;
-                background: ${i === spotIndex ? '#6c63ff' : 'rgba(255,255,255,0.25)'};
-                border: ${i === spotIndex ? '2px solid white' : '1px solid rgba(255,255,255,0.3)'};
-                transition: all 0.3s ease;
-                cursor: pointer;
-                box-shadow: ${i === spotIndex ? '0 0 0 4px rgba(108,99,255,0.3)' : 'none'};
-            " onclick="goToSpot(${i})"></div>
-        `).join('');
-    }
-}
-
-function loadPanorama(src, fade = true) {
-    const fadeEl = document.getElementById('tourFade');
-
-    const doLoad = () => {
-        if (window.pannellumViewer) {
-            window.pannellumViewer.destroy();
-            window.pannellumViewer = null;
-        }
-        window.pannellumViewer = pannellum.viewer('panoramaContainer', {
-            type: 'equirectangular',
-            panorama: src,
-            autoLoad: true,
-            autoRotate: 0,
-            compass: false,
-            showFullscreenCtrl: false,
-            showZoomCtrl: false,
-            mouseZoom: true,
-            hfov: 90,
-            minHfov: 50,
-            maxHfov: 110,
-            pitch: 0,
-            minPitch: -20,
-            maxPitch: 20,
-            strings: { loadingLabel: "Loading..." }
-        });
-
-        // Fade back in after photo loads
-        window.pannellumViewer.on('load', () => {
-            if (fadeEl) fadeEl.style.opacity = '0';
-        });
-    };
-
-    if (fade && fadeEl) {
-        fadeEl.style.opacity = '1';
-        setTimeout(doLoad, 350);
-    } else {
-        doLoad();
-    }
-}
-
-function moveSpot(direction) {
-    const modal = document.getElementById('virtualTourModal');
-    if (!modal) return;
-
-    const campus = campusData[state.currentCampus];
-    const building = campus.locations.find(l => l.name === modal.dataset.building);
-    if (!building) return;
-
-    const floorIndex = parseInt(modal.dataset.floorIndex);
-    let spotIndex = parseInt(modal.dataset.spotIndex);
-    const spots = building.tourPhotos[floorIndex].spots;
-
-    spotIndex += direction;
-    if (spotIndex < 0 || spotIndex >= spots.length) return;
-
-    modal.dataset.spotIndex = spotIndex;
-    loadPanorama(spots[spotIndex].src, true);
-    updateSpotUI(floorIndex, spotIndex, building);
-}
-
-function goToSpot(index) {
-    const modal = document.getElementById('virtualTourModal');
-    if (!modal) return;
-
-    const campus = campusData[state.currentCampus];
-    const building = campus.locations.find(l => l.name === modal.dataset.building);
-    if (!building) return;
-
-    const floorIndex = parseInt(modal.dataset.floorIndex);
-    const spots = building.tourPhotos[floorIndex].spots;
-
-    modal.dataset.spotIndex = index;
-    loadPanorama(spots[index].src, true);
-    updateSpotUI(floorIndex, index, building);
-}
-
-function switchFloor(floorIndex) {
-    const modal = document.getElementById('virtualTourModal');
-    if (!modal) return;
-
-    const campus = campusData[state.currentCampus];
-    const building = campus.locations.find(l => l.name === modal.dataset.building);
-    if (!building) return;
-
-    modal.dataset.floorIndex = floorIndex;
-    modal.dataset.spotIndex = '0';
-
-    const floors = building.tourPhotos;
-    const spots = floors[floorIndex].spots;
-
-    // Update floor tabs
-    floors.forEach((_, i) => {
-        const tab = document.getElementById(`floorTab_${i}`);
-        tab.style.background = i === floorIndex ? '#6c63ff' : 'transparent';
-        tab.style.borderColor = i === floorIndex ? '#6c63ff' : 'rgba(255,255,255,0.3)';
-    });
-
-    // Rebuild dots
-    const dotsContainer = document.getElementById('spotDots');
-    dotsContainer.innerHTML = spots.map((_, i) => `
-        <div id="dot_${i}" onclick="goToSpot(${i})" style="
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            background: ${i === 0 ? '#6c63ff' : 'rgba(255,255,255,0.3)'};
-            cursor: pointer;
-            transition: background 0.2s;
-        "></div>
-    `).join('');
-
-    loadPanorama(spots[0].src, true);
-    updateSpotUI(floorIndex, 0, building);
-}
-
-function updateSpotUI(floorIndex, spotIndex, building) {
-    const spots = building.tourPhotos[floorIndex].spots;
-
-    const label = document.getElementById('spotLabel');
-    const counter = document.getElementById('spotCounter');
-    if (label) label.innerHTML = `📍 <strong style="color:white;">${spots[spotIndex].label}</strong>`;
-    if (counter) counter.textContent = `${spotIndex + 1} / ${spots.length}`;
-
-    spots.forEach((_, i) => {
-        const dot = document.getElementById(`dot_${i}`);
-        if (dot) dot.style.background = i === spotIndex ? '#6c63ff' : 'rgba(255,255,255,0.3)';
-    });
-
-    updateArrows(spotIndex, spots.length);
-    updateMiniMap(floorIndex, spotIndex, building);
-}
-function updateArrows(spotIndex, total) {
-    const back    = document.getElementById('arrowBack');
-    const forward = document.getElementById('arrowForward');
-    if (back) {
-        back.style.opacity = spotIndex === 0 ? '0.3' : '1';
-        back.style.cursor  = spotIndex === 0 ? 'not-allowed' : 'pointer';
-    }
-    if (forward) {
-        forward.style.opacity = spotIndex >= total - 1 ? '0.3' : '1';
-        forward.style.cursor  = spotIndex >= total - 1 ? 'not-allowed' : 'pointer';
-    }
-}
-
-function closeVirtualTour() {
-    if (window.pannellumViewer) {
-        window.pannellumViewer.destroy();
-        window.pannellumViewer = null;
-    }
-    if (document._tourKeyHandler) {
-        document.removeEventListener('keydown', document._tourKeyHandler);
-        document._tourKeyHandler = null;
-    }
-    const modal = document.getElementById('virtualTourModal');
-    if (modal) modal.remove();
 }
 
 // Global function to navigate to a specific room
@@ -5728,7 +5283,6 @@ function clearRouteCompletely() {
 
     document.getElementById('routeInfo').classList.add('hidden');
     hideNavigationModeSwitcher();
-    closeVirtualTour();
     if (map3dState.active) exit3DMap();
     
     
@@ -5783,14 +5337,12 @@ function setNavigationMode(mode) {
         mapBtn?.classList.add('is-active');
         routeBtn?.classList.remove('is-active');
         routeInfo?.classList.add('hidden');
-        closeVirtualTour();
         return;
     }
 
     if (mode === 'route') {
         routeBtn?.classList.add('is-active');
         mapBtn?.classList.remove('is-active');
-        closeVirtualTour();
         if (routeInfo) routeInfo.classList.remove('hidden');
         return;
     }
@@ -5813,7 +5365,6 @@ function toggleRouteDetailsPanel() {
 
 function toggleNav3D() {
     const view3dBtn = document.getElementById('navMode3d');
-    closeVirtualTour();
 
     if (map3dState.active) {
         exit3DMap();
