@@ -2040,6 +2040,7 @@ try {
             coords: (dbB.lat && dbB.lng) ? [parseFloat(dbB.lat), parseFloat(dbB.lng)] : (existing?.coords || null),
             rooms: existing?.rooms || [],
             labelOffset: existing?.labelOffset || [0, 0],
+            entrance: existing?.entrance || null,   // walking target from campus-data.js (used by CampusRouter)
             image: existing?.image || null,
             photo: existing?.photo || null,   // ← ADD — populateBuildingPanel() filters on this field specifically
             description: dbB.description || existing?.description || null,

@@ -35,6 +35,9 @@
         bbox: [15.3145, 119.9798, 15.3220, 119.9876],
         walkSpeed: 1.4,            // m/s, used for estimated walking time
         snapMeters: 80,            // max distance from the user/destination to the graph
+        snapExtraMeters: 20,       // also try other paths up to this much farther than the closest one
+        snapMaxCandidates: 4,      // how many different paths to try at each end
+        snapSeparationMeters: 12,  // candidates closer than this count as the same path
         graphUrl: 'campus-graph.json',
         overpassUrls: [
             'https://overpass-api.de/api/interpreter',
@@ -382,6 +385,126 @@
         return { id: bestId, distance: bestD };
     }
 
+    // Nearest point on any path SEGMENT (not just the nearest node), so a start
+    // or destination beside a long path joins it right there instead of
+    // overshooting to a far-away node and doubling back.
+    function snapToEdge(graph, latlng) {
+        const cosLat = Math.cos(toRad(latlng[0]));
+        let best = null;
+        graph.adj.forEach((list, a) => {
+            const A = graph.nodes.get(a);
+            for (const e of list) {
+                if (a > e.to) continue;              // each edge is stored twice; test it once
+                const B = graph.nodes.get(e.to);
+                const ax = A[1] * cosLat, ay = A[0];
+                const dx = B[1] * cosLat - ax, dy = B[0] - ay;
+                const len2 = dx * dx + dy * dy;
+                let t = len2 ? ((latlng[1] * cosLat - ax) * dx + (latlng[0] - ay) * dy) / len2 : 0;
+                t = Math.max(0, Math.min(1, t));
+                const point = [A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1])];
+                const distance = haversine(latlng, point);
+                if (!best || distance < best.distance) best = { a, b: e.to, point, distance, name: e.name };
+            }
+        });
+        return best;
+    }
+
+    // Several snap options on DIFFERENT paths, not just the closest one. The path
+    // closest to a building's center is not always the one that gives the
+    // shortest walk, so route() tries each option and keeps the best total.
+    function snapCandidates(graph, latlng) {
+        const cosLat = Math.cos(toRad(latlng[0]));
+        const all = [];
+        graph.adj.forEach((list, a) => {
+            const A = graph.nodes.get(a);
+            for (const e of list) {
+                if (a > e.to) continue;              // each edge is stored twice; test it once
+                const B = graph.nodes.get(e.to);
+                const ax = A[1] * cosLat, ay = A[0];
+                const dx = B[1] * cosLat - ax, dy = B[0] - ay;
+                const len2 = dx * dx + dy * dy;
+                let t = len2 ? ((latlng[1] * cosLat - ax) * dx + (latlng[0] - ay) * dy) / len2 : 0;
+                t = Math.max(0, Math.min(1, t));
+                const point = [A[0] + t * (B[0] - A[0]), A[1] + t * (B[1] - A[1])];
+                all.push({ a, b: e.to, point, distance: haversine(latlng, point), name: e.name });
+            }
+        });
+        all.sort((x, y) => x.distance - y.distance);
+        const { snapExtraMeters, snapMaxCandidates, snapSeparationMeters } = CAMPUS_ROUTER_SETTINGS;
+        const picked = [];
+        for (const c of all) {
+            if (c.distance > all[0].distance + snapExtraMeters) break;
+            if (picked.some(p => haversine(p.point, c.point) < snapSeparationMeters)) continue;
+            picked.push(c);
+            if (picked.length >= snapMaxCandidates) break;
+        }
+        return picked;
+    }
+
+    // Walking target (door / footpath end) per building, by shortName.
+    // Buildings not listed here are routed to by their center point.
+    const BUILDING_ENTRANCES = {
+        'GYMNASIUM': [15.318462, 119.98233],
+        'LIBRARY': [15.318839, 119.984844],
+        'CTHM': [15.319726, 119.984382],
+        'CIT': [15.317684, 119.983427],
+        'CABA': [15.319432, 119.984811],
+        'AUTOMOTIVE TECH': [15.318279, 119.983886],
+        'FOOD TECH': [15.318089, 119.983747],
+        'MECHANICAL TECH': [15.317886, 119.983585],
+        'CIT NEW BUILDING': [15.317493, 119.983267],
+        'CIVIL TECH': [15.317298, 119.983133],
+        'DRAFTING TECH 2': [15.31892, 119.983468],
+        'DRAFTING TECH 1': [15.318776, 119.983436],
+        'MOCK HOTEL': [15.319606, 119.983948],
+        'GRADUATE SCHOOL (NEW)': [15.319205, 119.983665]
+
+    };
+
+    // Optional per-building walking target. If the building in campus-data.js has
+    // an `entrance: [lat, lng]`, routes to that building end there (at its own door
+    // or footpath) instead of at the building's center point.
+    function entranceFor(coords) {
+        try {
+            const data = typeof campusData !== 'undefined' ? campusData : null;
+            if (!data) return null;
+            for (const campus of Object.values(data)) {
+                for (const loc of campus.locations || []) {
+                    const entrance = loc.entrance || BUILDING_ENTRANCES[loc.shortName];
+                    if (!entrance || !loc.coords) continue;
+                    if (Math.abs(loc.coords[0] - coords[0]) < 1e-5 && Math.abs(loc.coords[1] - coords[1]) < 1e-5) {
+                        return entrance;
+                    }
+                }
+            }
+        } catch { /* campusData not available — use the original coordinates */ }
+        return null;
+    }
+
+    // Temporary copy of the graph with the snapped start/destination added as
+    // extra nodes sitting on their edges. The real graph is never modified.
+    function withSnapNodes(graph, snaps) {
+        const nodes = new Map(graph.nodes);
+        const adj = new Map();
+        graph.adj.forEach((list, id) => adj.set(id, list.slice()));
+        const link = (u, v, w, name) => {
+            if (!adj.has(u)) adj.set(u, []);
+            if (!adj.has(v)) adj.set(v, []);
+            adj.get(u).push({ to: v, w, name: name || '' });
+            adj.get(v).push({ to: u, w, name: name || '' });
+        };
+        const ids = snaps.map((sn, i) => {
+            const id = '__snap' + i;
+            nodes.set(id, sn.point);
+            link(id, sn.a, haversine(sn.point, graph.nodes.get(sn.a)), sn.name);
+            link(id, sn.b, haversine(sn.point, graph.nodes.get(sn.b)), sn.name);
+            return id;
+        });
+        const [p, q] = snaps;
+        if (p.a === q.a && p.b === q.b) link(ids[0], ids[1], haversine(p.point, q.point), p.name);
+        return { graph: { nodes, adj }, ids };
+    }
+
     function maneuverType(delta) {
         const a = Math.abs(delta);
         if (a < 35) return null;
@@ -439,19 +562,37 @@
     // Public: route() — same shape as fetchORSRoute()
     // ──────────────────────────────────────────
     async function route(startCoords, destCoords, algorithm = 'dijkstra') {
-        const graph = await load();
-        const s = nearestNode(graph, startCoords);
-        const d = nearestNode(graph, destCoords);
+        const base = await load();
         const limit = CAMPUS_ROUTER_SETTINGS.snapMeters;
-        if (s.distance > limit) throw new Error('Start is too far from the campus path network');
-        if (d.distance > limit) throw new Error('Destination is too far from the campus path network');
+        const starts = snapCandidates(base, startCoords);
+        destCoords = entranceFor(destCoords) || destCoords;
+        const dests = snapCandidates(base, destCoords);
+        if (!starts.length || starts[0].distance > limit) throw new Error('Start is too far from the campus path network');
+        if (!dests.length || dests[0].distance > limit) throw new Error('Destination is too far from the campus path network');
 
+        // Try every start/destination snap combination and keep the shortest total
+        // walk (path + the short straight connectors at both ends).
         const run = algorithm === 'astar' ? astar : dijkstra;
-        const res = run(graph, s.id, d.id);
-        if (!res.found) throw new Error('No walkable route found on the campus graph');
+        let best = null;
+        for (const cs of starts) {
+            for (const cd of dests) {
+                if (cs.distance > limit || cd.distance > limit) continue;
+                const ov = withSnapNodes(base, [cs, cd]);
+                const r = run(ov.graph, ov.ids[0], ov.ids[1]);
+                if (!r.found) continue;
+                const cost = r.distance + cs.distance + cd.distance;
+                if (!best || cost < best.cost) best = { s: cs, d: cd, res: r, graph: ov.graph, cost };
+            }
+        }
+        if (!best) throw new Error('No walkable route found on the campus graph');
+        const { s, d, res, graph } = best;
 
         const pts = res.ids.map(id => graph.nodes.get(id));
         const names = res.names.slice();
+        // drop near-duplicate points (a snap point that lands on a real node)
+        for (let i = pts.length - 1; i > 0; i--) {
+            if (haversine(pts[i - 1], pts[i]) < 0.5) { pts.splice(i, 1); names.splice(i, 1); }
+        }
         let total = res.distance;
 
         // Short straight connectors from the real start / destination to the graph
