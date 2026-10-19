@@ -82,6 +82,59 @@
         return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
     }
 
+        // ──────────────────────────────────────────
+    // Campus boundary (routes must never leave it)
+    // ──────────────────────────────────────────
+    let customBoundary = null;
+
+    function getBoundary() {
+        if (customBoundary) return customBoundary;
+        try {
+            if (typeof campusData !== 'undefined' && campusData) {
+                for (const c of Object.values(campusData)) {
+                    if (Array.isArray(c.boundary) && c.boundary.length >= 3) return c.boundary;
+                }
+            }
+        } catch { /* campusData not available */ }
+        return null;
+    }
+
+    function insideBoundary(lat, lng, poly = getBoundary()) {
+        if (!poly) return true;
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+            const [yi, xi] = poly[i], [yj, xj] = poly[j];
+            if ((yi > lat) !== (yj > lat) && lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        return inside;
+    }
+
+    function segmentInside(a, b, poly = getBoundary(), samples = 8) {
+        if (!poly) return true;
+        for (let s = 0; s <= samples; s++) {
+            const t = s / samples;
+            if (!insideBoundary(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, poly)) return false;
+        }
+        return true;
+    }
+
+    function pathInside(points) {
+        const poly = getBoundary();
+        if (!poly) return true;
+        const pts = points.map(p => Array.isArray(p) ? p : [p.lat, p.lng]);
+        for (let i = 0; i < pts.length; i++) {
+            if (!insideBoundary(pts[i][0], pts[i][1], poly)) return false;
+            if (i > 0 && !segmentInside(pts[i - 1], pts[i], poly, 4)) return false;
+        }
+        return true;
+    }
+
+    function setBoundary(poly) {
+        customBoundary = Array.isArray(poly) && poly.length >= 3 ? poly : null;
+        state.graph = null;
+        return !!customBoundary;
+    }
+
     // ──────────────────────────────────────────
     // Binary min-heap (priority queue)
     // ──────────────────────────────────────────
@@ -137,8 +190,12 @@
             if (!adj.has(a)) adj.set(a, []);
             adj.get(a).push({ to: b, w, name: name || '' });
         };
+        const poly = getBoundary();
+        if (!poly) console.warn('CampusRouter: no campus boundary found — routes are NOT limited to the campus.');
         compact.edges.forEach(([a, b, w, name]) => {
             if (!nodes.has(a) || !nodes.has(b) || a === b) return;
+            // Drop every path segment that touches or crosses outside the campus boundary.
+            if (poly && !segmentInside(nodes.get(a), nodes.get(b), poly)) return;
             add(a, b, w, name);
             add(b, a, w, name);      // pedestrians can walk both directions
         });
@@ -564,8 +621,18 @@
     async function route(startCoords, destCoords, algorithm = 'dijkstra') {
         const base = await load();
         const limit = CAMPUS_ROUTER_SETTINGS.snapMeters;
+        if (!insideBoundary(startCoords[0], startCoords[1])) {
+            const err = new Error('Start is outside the campus boundary');
+            err.code = 'OUTSIDE_CAMPUS';
+            throw err;
+        }
         const starts = snapCandidates(base, startCoords);
         destCoords = entranceFor(destCoords) || destCoords;
+        if (!insideBoundary(destCoords[0], destCoords[1])) {
+            const err = new Error('Destination is outside the campus boundary');
+            err.code = 'OUTSIDE_CAMPUS';
+            throw err;
+        }
         const dests = snapCandidates(base, destCoords);
         if (!starts.length || starts[0].distance > limit) throw new Error('Start is too far from the campus path network');
         if (!dests.length || dests[0].distance > limit) throw new Error('Destination is too far from the campus path network');
@@ -577,6 +644,8 @@
         for (const cs of starts) {
             for (const cd of dests) {
                 if (cs.distance > limit || cd.distance > limit) continue;
+                // the short straight connectors must not cut outside the campus either
+                if (!segmentInside(startCoords, cs.point) || !segmentInside(cd.point, destCoords)) continue;
                 const ov = withSnapNodes(base, [cs, cd]);
                 const r = run(ov.graph, ov.ids[0], ov.ids[1]);
                 if (!r.found) continue;
@@ -685,7 +754,10 @@
         get mode() { return state.mode; },
         get graph() { return state.graph; },
         load, route, compare, benchmark, setMode, exportGraph,
-        dijkstra, astar, buildGraph, compactFromOverpass, haversine
+        dijkstra, astar, buildGraph, compactFromOverpass, haversine,
+        isInsideCampus: (lat, lng) => insideBoundary(lat, lng),
+        pathInsideCampus: pathInside,
+        setBoundary
     };
 
     if (typeof window !== 'undefined') window.CampusRouter = api;

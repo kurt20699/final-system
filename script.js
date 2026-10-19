@@ -4216,17 +4216,37 @@ function showRoomDetails(room) {
 // Calls our own /api/route endpoint, which proxies to OpenRouteService —
 // keeps the ORS API key server-side, out of client JS.
 async function fetchORSRoute(startCoords, destCoords, profile = 'foot') {
-    // Own routing engine (campus-router.js): used when selected via
-    // CampusRouter.setMode('dijkstra' | 'astar'), and as an automatic
-    // fallback whenever the GraphHopper request fails.
+    // Campus-only navigation: never route from, to, or through anything
+    // outside the campus boundary (campusData[...].boundary).
+    const campus = campusData[state.currentCampus];
+    const boundary = campus && campus.boundary;
+    const outsideError = (msg) => {
+        const e = new Error(msg);
+        e.code = 'OUTSIDE_CAMPUS';
+        return e;
+    };
+    if (!isPointInsideBoundary(startCoords, boundary)) throw outsideError('Start is outside the campus');
+    if (!isPointInsideBoundary(destCoords, boundary)) throw outsideError('Destination is outside the campus');
+
     const cr = window.CampusRouter;
     if (cr && profile === 'foot' && cr.mode !== 'graphhopper') {
         try { return await cr.route(startCoords, destCoords, cr.mode); }
-        catch (err) { console.warn('CampusRouter failed, using GraphHopper:', err.message); }
+        catch (err) {
+            if (err.code === 'OUTSIDE_CAMPUS') throw err;
+            console.warn('CampusRouter failed, using GraphHopper:', err.message);
+        }
     }
     try {
-        return await fetchGraphHopperRoute(startCoords, destCoords, profile);
+        const ghRoute = await fetchGraphHopperRoute(startCoords, destCoords, profile);
+        // GraphHopper knows nothing about our boundary: reject any route that
+        // steps outside it and use our own router instead.
+        const stays = !boundary || ghRoute.coordinates.every(c => isPointInsideBoundary([c.lat, c.lng], boundary));
+        if (stays) return ghRoute;
+        console.warn('GraphHopper route left the campus boundary — using CampusRouter instead');
+        if (cr && profile === 'foot') return await cr.route(startCoords, destCoords, 'dijkstra');
+        throw outsideError('No route inside the campus');
     } catch (ghErr) {
+        if (ghErr.code === 'OUTSIDE_CAMPUS') throw ghErr;
         if (cr && profile === 'foot') {
             console.warn('GraphHopper failed, falling back to CampusRouter (Dijkstra):', ghErr.message);
             return await cr.route(startCoords, destCoords, 'dijkstra');
@@ -4492,8 +4512,41 @@ function handlePrimaryLocationAction() {
     }
 }
 
+// Navigation only works while the user is physically inside the campus
+// boundary. Returns true if navigation may continue.
+async function ensureUserInsideCampus(campus) {
+    let loc = null;
+
+    // A live watch (active navigation) is already fresh; otherwise take a
+    // new fix so an old reading can't wrongly block or allow the user.
+    if (state.watchId && state.userLocation) {
+        loc = state.userLocation;
+    } else {
+        showNotification('Checking your location...', 'info');
+        const fix = await getCampusUserLocation(campus);
+        if (fix) {
+            state.userLocation = { lat: fix.coords[0], lng: fix.coords[1], accuracy: fix.accuracy };
+            loc = state.userLocation;
+        }
+    }
+
+    // Location denied/unavailable: can't tell, so keep the old behavior
+    // (campus center as the start point).
+    if (!loc) return true;
+
+    if (isPointInsideBoundary([loc.lat, loc.lng], campus.boundary)) return true;
+
+    updateUserLocationMarker(loc.lat, loc.lng, loc.accuracy);
+    showNotification('📍 You are outside the campus. Navigation is only available inside the campus boundary.', 'warning');
+    return false;
+}
+
 async function navigateToSelected() {
     if (!state.selectedLocation) return;
+
+    // Outside the campus boundary → no navigation at all (checked before
+    // anything on screen is cleared or closed).
+    if (!(await ensureUserInsideCampus(campusData[state.currentCampus]))) return;
 
     // Visitors must state a purpose first (visitor-purpose.js). Cancelling
     // leaves the current map/route exactly as it was.
@@ -4637,8 +4690,15 @@ async function navigateToSelected() {
         showNotification('Route calculated!', 'success');
     } catch (err) {
         console.error('Routing error:', err);
-        showNotification('Could not calculate route. Using direct path.', 'error');
-        drawFallbackRoute(startCoords, destination, routingProfile);
+        if (err.code === 'OUTSIDE_CAMPUS') {
+            showNotification('📍 Navigation is only available inside the campus boundary.', 'warning');
+        } else if (window.CampusRouter && !window.CampusRouter.pathInsideCampus([startCoords, destination.coords])) {
+            // A straight line would cut outside the campus, so don't draw it.
+            showNotification('No walkable route found inside the campus.', 'error');
+        } else {
+            showNotification('Could not calculate route. Using direct path.', 'error');
+            drawFallbackRoute(startCoords, destination, routingProfile);
+        }
     }
 
     // Close location modal
@@ -5750,6 +5810,9 @@ async function rerouteFromCurrentLocation() {
     } catch (err) {
         // Keep the existing route; the cooldown prevents hammering the API.
         console.warn('Reroute failed, keeping the current route:', err);
+        if (err.code === 'OUTSIDE_CAMPUS') {
+            showNotification('📍 You have left the campus boundary. Navigation is paused.', 'warning');
+        }
     } finally {
         state.rerouting = false;
     }
