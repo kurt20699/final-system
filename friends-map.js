@@ -21,6 +21,7 @@
     const MIN_SEND_GAP_MS = 5000;    // never send faster than this
     const KEEPALIVE_MS = 20000;      // re-send even when standing still
     const MIN_MOVE_M = 4;            // or as soon as you've moved this far
+    const MAX_SHARE_ACCURACY_M = 50; // fixes rougher than this aren't shared
     const FADE_AFTER_MS = 45000;     // friend marker turns faded
     const REMOVE_AFTER_MS = 120000;  // friend marker removed
 
@@ -30,7 +31,8 @@
         sending: false,
         blocked: false,              // server said this account can't use Friends
         markers: new Map(),          // userId -> { marker, el, data, map }
-        popup: null
+        popup: null,
+        warnedLowAccuracy: false     // "turn on precise location" shown once
     };
 
     // ── Access to script.js globals (top-level const/functions are shared) ──
@@ -104,7 +106,15 @@
         }
         refreshMarkers();
         if (st.sending) return;
-        const loc = appState().userLocation;
+        const s = appState();
+        const loc = s.userDisplayLocation || s.userLocation;   // same point as your own blue dot
+        if (loc.accuracy > MAX_SHARE_ACCURACY_M) {
+            if (!st.warnedLowAccuracy && typeof window.showNotification === 'function') {
+                st.warnedLowAccuracy = true;
+                window.showNotification(`Your location is too rough to share with friends (±${Math.round(loc.accuracy)} m). Turn on Precise Location for your browser.`, 'warning');
+            }
+            return;                                             // wait for a better fix
+        }
         const now = Date.now();
         const last = st.lastSent;
         const due = !last
