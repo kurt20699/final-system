@@ -3140,6 +3140,9 @@ function connectRealtimeStream() {
                     case 'friendLocationStop':
                         window.FriendLocations?.onEvent(data);
                         break;
+                    case 'friendPhotoChanged':
+                        window.FriendsWidget?.onPhotoChanged(data);
+                        break;
                     // 'connected' / heartbeat comment frames: nothing to do.
                 }
             } catch { /* ignore malformed frames */ }

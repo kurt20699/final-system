@@ -1335,6 +1335,7 @@ app.post("/api/auth/update-photo", async (req, res) => {
             RETURNING user_id`,
             [photo, userId]
         );
+        if (result.rows.length) friendsApi.notifyPhotoChanged(result.rows[0].user_id); // 👥 live photo update for friends
         if (!result.rows.length) {
             return res.status(404).json({ ok: false, error: "User not found." });
         }

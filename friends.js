@@ -11,8 +11,8 @@
 //   FriendsWidget.refresh()        — after login / on a 'friendsChanged' event
 //   FriendsWidget.onProfileOpen()  — when the profile panel opens
 //   FriendsWidget.reset()          — on logout
-// Step 4 (location sharing) will use FriendsWidget.isSharingPaused() and
-// FriendsWidget.getFriends().
+//   FriendsWidget.onPhotoChanged() — on a 'friendPhotoChanged' event
+// friends-map.js uses FriendsWidget.isSharingPaused() and FriendsWidget.getFriends().
 
 (function () {
     'use strict';
@@ -69,7 +69,7 @@
         if (person.hasPhoto) {
             const img = document.createElement('img');
             img.alt = '';
-            img.src = photoUrl(person.userId);
+            img.src = photoUrl(person.userId, person.photoVersion);
             img.onerror = showInitials;
             box.appendChild(img);
         } else {
@@ -78,9 +78,25 @@
         return box;
     }
 
-    function photoUrl(userId) {
+    // version changes whenever the friend changes their photo, so the browser
+    // fetches the new picture instead of showing a cached old one.
+    function photoUrl(userId, version) {
         const token = getSession()?.token || '';
-        return `/api/friends/photo/${encodeURIComponent(userId)}?token=${encodeURIComponent(token)}`;
+        return `/api/friends/photo/${encodeURIComponent(userId)}?v=${encodeURIComponent(version || '')}&token=${encodeURIComponent(token)}`;
+    }
+
+    // A friend changed their profile photo ('friendPhotoChanged' event).
+    function onPhotoChanged(data) {
+        if (!data || !data.userId) return;
+        const { friends, incoming, outgoing } = state.data;
+        for (const person of [...friends, ...incoming, ...outgoing]) {
+            if (person.userId === data.userId) {
+                person.hasPhoto = data.hasPhoto;
+                person.photoVersion = data.photoVersion;
+            }
+        }
+        if (state.section) render();
+        window.dispatchEvent(new CustomEvent('friends:photo-changed', { detail: data }));
     }
 
     // ── API ───────────────────────────────────
@@ -344,6 +360,7 @@
         refresh,
         reset,
         onProfileOpen,
+        onPhotoChanged,
         isSharingPaused,
         canUseFriends: () => canUseFriends(),
         getFriends: () => state.data.friends.slice(),

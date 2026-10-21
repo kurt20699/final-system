@@ -1,4 +1,4 @@
-    // ══════════════════════════════════════════
+// ══════════════════════════════════════════
     // 👥 FRIENDS — server routes
     // ══════════════════════════════════════════
     // Loaded from server.js with:
@@ -21,7 +21,8 @@
     async function loadUser(identifier, idOnly = false) {
         const result = await pool.query(
         `SELECT user_id, full_name, role, email_verified, verification_status,
-                (photo IS NOT NULL AND photo <> '') AS has_photo
+                (photo IS NOT NULL AND photo <> '') AS has_photo,
+                LEFT(md5(COALESCE(photo, '')), 10) AS photo_version
         FROM users
         WHERE LOWER(user_id) = LOWER($1) ${idOnly ? "" : "OR LOWER(email) = LOWER($1)"}
         LIMIT 1`,
@@ -68,6 +69,7 @@
     // Other server modules (friend-locations.js) can react when two people
     // become friends or stop being friends.
     const pairListeners = [];
+    const photoListeners = [];
     function notifyFriendsChanged(...userIds) {
         for (const id of userIds) sendToUser(id, { type: "friendsChanged", at: Date.now() });
         if (userIds.length === 2) {
@@ -94,7 +96,8 @@
         userId: row.user_id,
         name: row.full_name,
         role: Permissions.normalizeRole(row.role),
-        hasPhoto: row.has_photo === true
+        hasPhoto: row.has_photo === true,
+        photoVersion: row.photo_version || ""   // changes whenever the photo changes
         };
     }
 
@@ -106,7 +109,8 @@
             `SELECT f.id, f.status, f.created_at, f.responded_at,
                     (f.requester_id = $1) AS sent_by_me,
                     u.user_id, u.full_name, u.role,
-                    (u.photo IS NOT NULL AND u.photo <> '') AS has_photo
+                    (u.photo IS NOT NULL AND u.photo <> '') AS has_photo,
+                    LEFT(md5(COALESCE(u.photo, '')), 10) AS photo_version
             FROM friendships f
             JOIN users u ON u.user_id = CASE WHEN f.requester_id = $1 THEN f.addressee_id ELSE f.requester_id END
             WHERE f.requester_id = $1 OR f.addressee_id = $1
@@ -266,12 +270,42 @@
         const match = typeof photo === "string" && photo.match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/);
         if (!match) return res.status(404).end();
         res.set("Content-Type", match[1]);
-        res.set("Cache-Control", "private, max-age=300");
+        res.set("Cache-Control", "private, max-age=86400"); // the URL has ?v=<photo version>, so a new photo gets a new URL
         return res.send(Buffer.from(match[2], "base64"));
         } catch (err) {
         return res.status(500).end();
         }
     });
+
+    // Called by server.js right after a user changes their profile photo.
+    // Everyone who can see that photo (friends + pending requests) gets a
+    // 'friendPhotoChanged' event, so the list and map marker update instantly.
+    async function notifyPhotoChanged(userId) {
+        try {
+        const result = await pool.query(
+            `SELECT u.user_id,
+                    (u.photo IS NOT NULL AND u.photo <> '') AS has_photo,
+                    LEFT(md5(COALESCE(u.photo, '')), 10) AS photo_version,
+                    ARRAY(SELECT CASE WHEN f.requester_id = u.user_id THEN f.addressee_id ELSE f.requester_id END
+                        FROM friendships f
+                        WHERE f.requester_id = u.user_id OR f.addressee_id = u.user_id) AS others
+            FROM users u WHERE LOWER(u.user_id) = LOWER($1)`,
+            [userId]
+        );
+        const row = result.rows[0];
+        if (!row) return;
+        const event = {
+            type: "friendPhotoChanged",
+            userId: row.user_id,
+            hasPhoto: row.has_photo === true,
+            photoVersion: row.photo_version
+        };
+        for (const id of row.others) sendToUser(id, event);
+        for (const fn of photoListeners) fn(event);
+        } catch (err) {
+        console.warn("Friends photo update failed:", err.message);
+        }
+    }
 
     // Used by the location-sharing part (Step 4): the accepted friends of a user.
     async function getFriendIds(userId) {
@@ -286,6 +320,8 @@
 
     return {
     sendToUser, getFriendIds, requireFriendsUser, loadUser,
-    onPairChanged: (fn) => pairListeners.push(fn)
+    onPairChanged: (fn) => pairListeners.push(fn),
+    onPhotoChanged: (fn) => photoListeners.push(fn),
+    notifyPhotoChanged
     };
 };

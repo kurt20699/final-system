@@ -157,7 +157,7 @@
         wrap.querySelector('.friend-marker-name').textContent = firstName(data.name);
         const avatar = wrap.querySelector('.friend-marker-avatar');
         const fw = window.FriendsWidget;
-        const wantPhoto = data.hasPhoto ? fw.photoUrl(data.userId) : '';
+        const wantPhoto = data.hasPhoto ? fw.photoUrl(data.userId, data.photoVersion) : '';
         if (avatar.dataset.src === wantPhoto && avatar.childNodes.length) return;
         avatar.dataset.src = wantPhoto;
         const showInitials = () => { avatar.replaceChildren(); avatar.textContent = fw.initials(data.name); };
@@ -293,6 +293,15 @@
     // ── Wiring ────────────────────────────────
     window.addEventListener('friends:sharing-changed', () => { st.blocked = false; tick(); });
     window.addEventListener('friends:list-changed', () => refreshMarkers());
+
+    // A friend changed their profile photo → swap the picture on their marker now.
+    window.addEventListener('friends:photo-changed', (e) => {
+        const { userId, hasPhoto, photoVersion } = e.detail || {};
+        const entry = st.markers.get(userId);
+        if (!entry) return;
+        entry.data = { ...entry.data, hasPhoto, photoVersion };
+        fillMarkerElement(entry.el, entry.data);
+    });
 
     // Closing the tab/app: tell the server right away (the 2-minute timeout
     // and the closed realtime connection would also catch it).

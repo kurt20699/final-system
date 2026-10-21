@@ -26,7 +26,7 @@ const PROFILE_CACHE_MS = 60 * 1000;     // how long a user's friends list is cac
 const SWEEP_EVERY_MS = 15 * 1000;
 
 module.exports = function registerFriendLocations(app, { friendsApi, activeUserConnections }) {
-  const { sendToUser, getFriendIds, loadUser, onPairChanged } = friendsApi;
+  const { sendToUser, getFriendIds, loadUser, onPairChanged, onPhotoChanged } = friendsApi;
 
   const live = new Map();       // userId -> { lat, lng, accuracy, at, name, hasPhoto }
   const profiles = new Map();   // userId -> { ok, name, hasPhoto, friendIds: Set, until }
@@ -38,6 +38,7 @@ module.exports = function registerFriendLocations(app, { friendsApi, activeUserC
     const user = await loadUser(userId, true);
     const profile = user && user.canUseFriends
       ? { ok: true, userId: user.user_id, name: user.full_name, hasPhoto: user.has_photo === true,
+          photoVersion: user.photo_version || "",
           friendIds: new Set(await getFriendIds(user.user_id)), until: Date.now() + PROFILE_CACHE_MS }
       : { ok: false, until: Date.now() + PROFILE_CACHE_MS };
     profiles.set(userId, profile);
@@ -50,6 +51,7 @@ module.exports = function registerFriendLocations(app, { friendsApi, activeUserC
       userId,
       name: entry.name,
       hasPhoto: entry.hasPhoto,
+      photoVersion: entry.photoVersion,
       lat: entry.lat,
       lng: entry.lng,
       accuracy: entry.accuracy,
@@ -113,7 +115,8 @@ module.exports = function registerFriendLocations(app, { friendsApi, activeUserC
       accuracy: Math.round(accuracy),
       at: now,
       name: me.name,
-      hasPhoto: me.hasPhoto
+      hasPhoto: me.hasPhoto,
+      photoVersion: me.photoVersion
     };
     live.set(me.userId, entry);
 
@@ -145,6 +148,14 @@ module.exports = function registerFriendLocations(app, { friendsApi, activeUserC
       sendToUser(a, { type: "friendLocationStop", userId: b });
       sendToUser(b, { type: "friendLocationStop", userId: a });
     }
+  });
+
+  // ── Profile photo changed → use the new photo in future location updates ──
+  // (friends-routes.js already sent friends a 'friendPhotoChanged' event.)
+  onPhotoChanged(({ userId, hasPhoto, photoVersion }) => {
+    profiles.delete(userId);
+    const entry = live.get(userId);
+    if (entry) { entry.hasPhoto = hasPhoto; entry.photoVersion = photoVersion; }
   });
 
   // ── Cleanup: silent for 2 minutes, or no app tab open anymore ──
