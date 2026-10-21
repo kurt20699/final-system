@@ -43,7 +43,10 @@
         try { return JSON.parse(localStorage.getItem('campusNavigatorSession') || 'null')?.token || ''; } catch { return ''; }
     }
 
+    const ALLOW_OFF_CAMPUS_FOR_TESTING = true; // ⚠️ set back to false before real use
+
     function insideCampus(lat, lng) {
+        if (ALLOW_OFF_CAMPUS_FOR_TESTING) return true;
         try {
             const campus = campusData[appState().currentCampus];
             if (!campus?.boundary) return true;
