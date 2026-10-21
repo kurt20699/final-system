@@ -21,6 +21,7 @@
         <link href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css" rel="stylesheet">
         <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
         <link rel="stylesheet" href="style.css?v=9">
+        <link rel="stylesheet" href="friends.css">
 
         <style>
             #authScreen:not(.hidden) ~ #ai-chat-widget-root {
@@ -275,6 +276,7 @@
                                     <span class="active-users-badge" id="activeUsersBadge" title="People currently using the system">
                                         🟢 <span id="activeUsersCount">0</span> online
                                     </span>
+                                </div>
                             </div>
                         </div>
                     </header>
@@ -691,8 +693,8 @@
                     </button>
                 </div>
     
-            <!-- Logout Confirmation Modal -->
-            <div id="logoutModal" class="modal">
+            </div><!-- end #profilePanel --> <!-- Logout Confirmation Modal -->
+            <div id="logoutModal" class="modal" style="z-index:2100;">
                 <div class="modal-content logout-modal">
                     <h2 class="logout-title">Log out of your account?</h2>
                     <div class="logout-actions">
@@ -722,6 +724,8 @@
         <script src="weather-widget.js" defer></script>
         <script src="ai-chat-widget.js" defer></script>
         <script src="employee-announcement-widget.js" defer></script>
+        <script src="friends.js" defer></script>
+        <script src="friends-map.js" defer></script>
         <script src="campus-router.js"></script>
         
         <script>

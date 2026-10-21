@@ -38,6 +38,7 @@
         snapExtraMeters: 20,       // also try other paths up to this much farther than the closest one
         snapMaxCandidates: 4,      // how many different paths to try at each end
         snapSeparationMeters: 12,  // candidates closer than this count as the same path
+        offPathPenalty: 2,         // walking off the paths counts this many times more when picking the route
         graphUrl: 'campus-graph.json',
         overpassUrls: [
             'https://overpass-api.de/api/interpreter',
@@ -649,7 +650,7 @@
                 const ov = withSnapNodes(base, [cs, cd]);
                 const r = run(ov.graph, ov.ids[0], ov.ids[1]);
                 if (!r.found) continue;
-                const cost = r.distance + cs.distance + cd.distance;
+                const cost = r.distance + CAMPUS_ROUTER_SETTINGS.offPathPenalty * (cs.distance + cd.distance);
                 if (!best || cost < best.cost) best = { s: cs, d: cd, res: r, graph: ov.graph, cost };
             }
         }
@@ -665,8 +666,8 @@
         let total = res.distance;
 
         // Short straight connectors from the real start / destination to the graph
-        if (s.distance > 1) { pts.unshift(startCoords); names.unshift(names[0] || ''); total += s.distance; }
-        if (d.distance > 1) { pts.push(destCoords); names.push(names[names.length - 1] || ''); total += d.distance; }
+        if (s.distance > 1) { pts.unshift(startCoords); names.unshift(names[0] || ''); } // drawn on the map, but not counted in the total
+        if (d.distance > 1) { pts.push(destCoords); names.push(names[names.length - 1] || ''); } // drawn on the map, but not counted in the total
 
         return {
             coordinates: pts.map(([lat, lng]) => ({ lat, lng })),
@@ -674,7 +675,7 @@
                 totalDistance: total,
                 totalTime: total / CAMPUS_ROUTER_SETTINGS.walkSpeed
             },
-            instructions: buildInstructions(pts, names),
+            instructions: buildInstructions(d.distance > 1 ? pts.slice(0, -1) : pts, d.distance > 1 ? names.slice(0, -1) : names),
             meta: {
                 engine: 'CampusRouter',
                 algorithm: res.algorithm,

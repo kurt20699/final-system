@@ -82,7 +82,7 @@ app.use(express.json({ limit: '20mb' }));
 // Sign-up, login, email verification and password reset are skipped because
 // the person isn't logged in yet there.
 const PUBLIC_AUTH_ROUTES = ["/api/auth/register", "/api/auth/login", "/api/auth/verify-email",
-  "/api/auth/visitor/reactivate", "/api/auth/forgot/", "/api/notify-registration"];
+  "/api/auth/visitor/reactivate", "/api/auth/forgot/"];
 app.use("/api", (req, res, next) => {
   const urlPath = req.originalUrl.split("?")[0];
   if (PUBLIC_AUTH_ROUTES.some(p => urlPath.startsWith(p))) return next();
@@ -103,7 +103,7 @@ app.use("/api", (req, res, next) => {
 // ✅ Lets the app check if its saved login is still valid
 app.get("/api/auth/check", (req, res) => res.json({ ok: !!req.authUserId }));
 // ✅ Block server-only files from being downloaded by the browser
-const BLOCKED_FILES = /^\/(server\.js|package(-lock)?\.json|seed-[^/]*\.js|node_modules(\/.*)?|\.git(\/.*)?|.*\.(md|sql|log|env))$/i;
+const BLOCKED_FILES = /^\/(server\.js|server\/.*|package(-lock)?\.json|seed-[^/]*\.js|node_modules(\/.*)?|\.git(\/.*)?|.*\.(md|sql|log|env))$/i;
 app.use((req, res, next) => {
   let p;
   try { p = path.posix.normalize(decodeURIComponent(req.path).replace(/\\/g, '/')).replace(/\/+/g, '/'); } catch { return res.status(400).end(); }
@@ -142,6 +142,13 @@ function formatApprovalMessage({ name, role }) {
     "Thank you for registering with PRMSU Smart Campus Navigator.",
     "PRMSU Smart Campus Navigator Team"
   ].join("\n");
+}
+
+// Only real base64 image data URLs are accepted for ID documents and
+// profile photos, because these values are placed into <img src="...">.
+const SAFE_IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/;
+function isSafeImageDataUrl(value) {
+  return typeof value === "string" && SAFE_IMAGE_DATA_URL_RE.test(value);
 }
 
 const bcrypt = require("bcryptjs");
@@ -704,6 +711,9 @@ app.post("/api/auth/register", async (req, res) => {
   if (idDocument.length > 15 * 1024 * 1024) {
     return res.status(400).json({ ok: false, error: "ID photo is too large. Please upload a smaller image." });
   }
+  if (!isSafeImageDataUrl(idDocument)) {
+    return res.status(400).json({ ok: false, error: "Please upload your ID as a JPG, PNG, WEBP or GIF image." });
+  }
 
   if (normalizedRole === "VISITOR" && !isWithinVisitorHours()) {
     return res.status(403).json({ ok: false, error: "Visitor registration is only available from 7:00 AM to 5:00 PM." });
@@ -1206,7 +1216,7 @@ app.post("/api/auth/forgot/reset", async (req, res) => {
   }
 });
 
-app.post("/api/datasets", async (req, res) => {
+app.post("/api/datasets", requireAdmin, async (req, res) => {
   const { title, description, payload } = req.body;
 
   if (!title) {
@@ -1227,7 +1237,7 @@ app.post("/api/datasets", async (req, res) => {
   }
 });
 
-app.get("/api/datasets", async (_req, res) => {
+app.get("/api/datasets", requireAdmin, async (_req, res) => {
   try {
     const result = await pool.query(
       "SELECT id, title, description, payload, created_at FROM datasets ORDER BY created_at DESC"
@@ -1263,7 +1273,7 @@ app.get("/api/auth/profile/:userId", async (req, res) => {
                 email:  u.email,
                 phone:  u.phone  || "",
                 role:   u.role,
-                photo:  u.photo  || ""
+                photo:  isSafeImageDataUrl(u.photo) ? u.photo : ""
             }
         });
     } catch (err) {
@@ -1314,6 +1324,9 @@ app.post("/api/auth/update-photo", async (req, res) => {
     }
     if (photo.length > 3 * 1024 * 1024) {
         return res.status(413).json({ ok: false, error: "Photo too large (max ~2MB)." });
+    }
+    if (!isSafeImageDataUrl(photo)) {
+        return res.status(400).json({ ok: false, error: "Please upload a JPG, PNG, WEBP or GIF image." });
     }
     try {
         const result = await pool.query(
@@ -1387,30 +1400,6 @@ app.post("/api/routes/record", async (req, res) => {
         return res.status(500).json({ ok: false, error: err.message });
     }
 });
-
-// ── Campus Weather ──────────────────────────────────────────────
-// Iba Campus coordinates — matches campusData.iba.center in campus-data.js.
-const WEATHER_LOCATION = { lat: 15.318547, lng: 119.98376 };
-
-// WMO weather codes (the standard Open-Meteo uses) → icon + human label.
-function mapWeatherCode(code) {
-  if (code === 0 || code === 1) return { icon: "☀️", condition: "Mostly Sunny" };
-  if (code === 2) return { icon: "⛅", condition: "Partly Cloudy" };
-  if (code === 3) return { icon: "☁️", condition: "Cloudy" };
-  if (code === 45 || code === 48) return { icon: "🌫️", condition: "Foggy" };
-  if ([51, 53, 55, 56, 57].includes(code)) return { icon: "🌦️", condition: "Light Rain" };
-  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { icon: "🌧️", condition: "Rainy" };
-  if ([71, 73, 75, 77, 85, 86].includes(code)) return { icon: "❄️", condition: "Snow" };
-  if ([95, 96, 99].includes(code)) return { icon: "⛈️", condition: "Thunderstorm" };
-  return { icon: "⛅", condition: "Partly Cloudy" }; // safe fallback for any code not explicitly handled
-}
-
-// Open-Meteo needs no API key, but there's no reason to re-fetch on every
-// single client poll — weather is effectively unchanged for several
-// minutes at a time. A short in-memory cache also means a slow/failed
-// upstream call can still serve the last good reading instead of an error.
-let weatherCache = { data: null, fetchedAt: 0 };
-const WEATHER_CACHE_MS = 5 * 60 * 1000; // 5 minutes
 
 // ══════════════════════════════════════════
 // 🌤️ CAMPUS WEATHER — tries 3 providers in order, so one failing
@@ -1568,52 +1557,9 @@ app.get("/api/weather", async (_req, res) => {
   return res.status(503).json({ ok: false, error: "Weather data is temporarily unavailable." });
 });
 
-// Old single-provider weather route — replaced by the one above, kept only
-// so nothing else in this file breaks. Nothing in the app calls it anymore.
-app.get("/api/weather-old", async (_req, res) => {
-  const now = Date.now();
-  if (weatherCache.data && (now - weatherCache.fetchedAt) < WEATHER_CACHE_MS) {
-    return res.json(weatherCache.data);
-  }
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-  try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LOCATION.lat}&longitude=${WEATHER_LOCATION.lng}&current=temperature_2m,weather_code&timezone=auto`;
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    const data = await response.json();
-
-    if (!response.ok || !data.current || typeof data.current.temperature_2m !== "number") {
-      throw new Error(data.reason || "Weather provider returned no current data.");
-    }
-
-    const { icon, condition } = mapWeatherCode(data.current.weather_code);
-    const payload = {
-      ok: true,
-      temperatureC: data.current.temperature_2m,
-      condition,
-      icon,
-      location: "Iba Campus",
-      updatedAt: data.current.time || new Date().toISOString()
-    };
-
-    weatherCache = { data: payload, fetchedAt: now };
-    return res.json(payload);
-  } catch (err) {
-    clearTimeout(timeoutId);
-    console.warn("Weather fetch failed:", err.message);
-    // Graceful degradation — serve the last known-good reading rather than
-    // a hard error, if one exists, even though it's past its cache window.
-    if (weatherCache.data) return res.json(weatherCache.data);
-    return res.status(503).json({ ok: false, error: "Weather data is temporarily unavailable." });
-  }
-});
-
 
 // ── ROUTE HISTORY: Get count for a user ──
-app.get("/api/routes/count/:userId", async (req, res) => {
+app.get("/api/routes/count/:userId", async (req, res) => { if (!req.authUserId || req.authUserId.toLowerCase() !== String(req.params.userId).toLowerCase()) return res.status(403).json({ ok: false, error: "Not allowed." });
     const { userId } = req.params;
     try {
         const result = await pool.query(
@@ -1764,7 +1710,7 @@ app.get("/api/active-users/stream", (req, res) => {
   // system" — give each one a throwaway id scoped to this connection only,
   // so they don't collide with a real userId and don't persist after the
   // tab closes.
-  const userId = req.query.userId ? String(req.query.userId) : `guest-${crypto.randomUUID()}`;
+  const userId = req.authUserId || `guest-${crypto.randomUUID()}`; // verified by the login token
   const role = Permissions.normalizeRole(req.query.role); // fails-closed to VISITOR if missing/unknown
 
   res.writeHead(200, {
@@ -1861,7 +1807,7 @@ app.get("/api/map-data/stream", (req, res) => {
 // broadcastActiveUserCount(), and broadcastMapDataChanged() all reach it
 // without any change to how those functions work.
 app.get("/api/realtime/stream", (req, res) => {
-  const userId = req.query.userId ? String(req.query.userId) : `guest-${crypto.randomUUID()}`;
+  const userId = req.authUserId || `guest-${crypto.randomUUID()}`; // verified by the login token
   const role = Permissions.normalizeRole(req.query.role);
 
   res.writeHead(200, {
@@ -2177,7 +2123,13 @@ app.get("/api/admin/users/pending", requireAdmin, async (_req, res) => {
          AND NOT (UPPER(role) = 'VISITOR' AND ${VISITOR_EXPIRED_SQL})
        ORDER BY created_at ASC`
     );
-    return res.json({ ok: true, users: result.rows });
+    // Rows saved before validation existed may hold anything — only send
+    // real image data, otherwise the dashboard shows "No ID photo".
+    const users = result.rows.map(u => ({
+      ...u,
+      id_document: isSafeImageDataUrl(u.id_document) ? u.id_document : null
+    }));
+    return res.json({ ok: true, users });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
@@ -3144,6 +3096,10 @@ app.delete('/api/admin/buildings/:id', requireAdmin, async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+// 👥 Friends feature — all of its code lives in server/friends-routes.js
+const friendsApi = require("./server/friends-routes.js")(app, { pool, Permissions, activeUserConnections });
+require("./server/friend-locations.js")(app, { friendsApi, activeUserConnections });
 
 app.listen(port, () => {
   console.log(`Supabase API running on http://localhost:${port}`);

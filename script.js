@@ -1099,7 +1099,7 @@ function hideLoadingScreen() {
 
 const AUTH_USERS_KEY = 'campusNavigatorUsers';
 const AUTH_SESSION_KEY = 'campusNavigatorSession';
-const AUTH_RESET_KEY = 'campusNavigatorResetState';
+const AUTH_RESET_KEY = 'campusNavigatorResetState'; try { localStorage.removeItem(AUTH_USERS_KEY); } catch {} // remove old plaintext local accounts
 
 function getStoredUsers() {
     try {
@@ -1213,8 +1213,10 @@ function logoutUser() {
         if (state.currentRoute || state.multiStop?.active) clearRouteCompletely();
         stopNavigationLocationWatch();
     } catch (e) { console.warn('Logout cleanup:', e); }
+    window.FriendLocations?.stop(); // 📍 stop sharing location (friends-map.js)
     localStorage.removeItem(AUTH_SESSION_KEY);
     window.VisitPurpose?.clear();
+    window.FriendsWidget?.reset(); // 👥 clear friends list + badge (friends.js)
     window.EmployeeAnnouncementWidget?.refresh();
 
     // ✅ Logging out drops back to Visitor rules — re-hide Campus Alerts/Tips
@@ -1620,7 +1622,7 @@ function setupAuthHandlers() {
                 const matchesIdentifier = identifierType === 'email'
                     ? normalizedEmail === identifier
                     : normalizedUserId === identifier.toLowerCase();
-                return matchesIdentifier && entry.password === password;
+                return false; // legacy local-account login disabled — server login only
             });
         }
 
@@ -3044,6 +3046,7 @@ function loadCampus(campusKey) {
 
     loadAndShowAlerts();
     connectRealtimeStream(); // ✅ ADD — one connection for announcements + active users + map data
+    window.FriendsWidget?.refresh(); // 👥 friend requests badge (friends.js)
 
     initializeMap();
     saveData();
@@ -3129,6 +3132,13 @@ function connectRealtimeStream() {
                         if (typeof window.refreshCampusTips === 'function') {
                             window.refreshCampusTips();
                         }
+                        break;
+                    case 'friendsChanged':
+                        window.FriendsWidget?.refresh();
+                        break;
+                    case 'friendLocation':
+                    case 'friendLocationStop':
+                        window.FriendLocations?.onEvent(data);
                         break;
                     // 'connected' / heartbeat comment frames: nothing to do.
                 }
@@ -6844,6 +6854,7 @@ async function openProfilePanel() {
     const activitySection = document.getElementById('profileActivitySection');
     const canSeeRouteHistory = window.Permissions?.canUseFeature(session.role, 'routeHistory');
     if (activitySection) activitySection.style.display = canSeeRouteHistory ? '' : 'none';
+    window.FriendsWidget?.onProfileOpen(); // 👥 Friends section (friends.js)
 
     const existingPanel = document.getElementById('profilePanel');
     if (existingPanel && existingPanel.classList.contains('open')) return;
@@ -6929,13 +6940,19 @@ function profileRenderAvatar(name, photoDataUrl) {
 
     if (photoDataUrl) {
         // Profile panel avatar
-        el.innerHTML = `<img src="${photoDataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+        const avatarImg = document.createElement('img');
+        avatarImg.src = photoDataUrl;
+        avatarImg.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        el.replaceChildren(avatarImg);
 
         // ✅ Header chip — show the photo
         chip.style.background = 'transparent';
         chip.style.padding = '0';
         chip.style.overflow = 'hidden';
-        chip.innerHTML = `<img src="${photoDataUrl}" style="width:20px;height:20px;object-fit:cover;border-radius:50%;display:block;">`;
+        const chipImg = document.createElement('img');
+        chipImg.src = photoDataUrl;
+        chipImg.style.cssText = 'width:20px;height:20px;object-fit:cover;border-radius:50%;display:block;';
+        chip.replaceChildren(chipImg);
     } else {
         // Profile panel avatar — initials fallback
         const initials = (name || '?').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
@@ -7211,9 +7228,9 @@ function addDynamicBuildingFootprints3D() {
     const campus = campusData[state.currentCampus];
     if (!ml || !campus) return;
 
-    updateBuildings3DCampusFilter();
+    
 
-    updateBuildings3DCampusFilter();
+    
 
     const typeColors = {
         administration: '#2c5aa0',
@@ -7247,7 +7264,7 @@ function addDynamicBuildingFootprints3D() {
             };
         });
 
-    if (!features.length) return;
+    refreshStatic3DFootprints(features); if (!features.length) return;
 
     if (ml.getSource('dynamic-building-footprints')) {
         ml.getSource('dynamic-building-footprints').setData({ type: 'FeatureCollection', features });
@@ -7487,6 +7504,25 @@ function updateBuildings3DCampusFilter() {
     ]);
 }
 
+// Hides a hard-coded 3D outline when an admin has drawn a footprint for the
+// same building, so the two extrusions don't overlap and flicker.
+function refreshStatic3DFootprints(dbFeatures) {
+    const ml = map3dState.map;
+    const source = ml?.getSource('building-footprints');
+    const all = map3dState.staticFootprintFeatures;
+    if (!source || !all) return;
+    const dbRings = (dbFeatures || []).map(f => f.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]));
+    const visible = all.filter(f => {
+        let pts = f.geometry.coordinates[0];
+        const a = pts[0], b = pts[pts.length - 1];
+        if (pts.length > 1 && a[0] === b[0] && a[1] === b[1]) pts = pts.slice(0, -1);
+        const lng = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+        const lat = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+        return !dbRings.some(ring => isPointInsideBoundary([lat, lng], ring));
+    });
+    source.setData({ type: 'FeatureCollection', features: visible });
+}
+
 function add3DBuildingLayer() {
     const ml = map3dState.map;
 
@@ -7494,7 +7530,7 @@ function add3DBuildingLayer() {
         ml.setPaintProperty('building-3d', 'fill-extrusion-opacity', 0.65);
     }
 
-    updateBuildings3DCampusFilter();
+    
 
     // ── ALL BUILDING FOOTPRINTS ──
     // Read static footprints from the single source of truth so the 3D map
@@ -8260,6 +8296,9 @@ function add3DBuildingLayer() {
             ]
         }
     });
+
+    // Keep the full list of hard-coded outlines so admin-drawn ones can replace them.
+    map3dState.staticFootprintFeatures = ml.getSource('building-footprints').serialize().data.features;
 
     // Flat fill
     ml.addLayer({
