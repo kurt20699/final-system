@@ -173,14 +173,29 @@
 }
 
 /* ══════════════════════════════════════════
-   📍 FRIEND MARKERS ON THE MAP (see friends-map.js)
+   📍 FRIEND MARKERS ON THE MAP (see friend-locations.js)
    ══════════════════════════════════════════ */
+/* Pin layout, top to bottom: name, photo, pointer.
+   The marker is anchored at its bottom edge, so the pointer's tip sits
+   exactly on the friend's position. */
 .friend-marker {
-    position: relative;
-    width: 38px;
-    height: 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     cursor: pointer;
     transition: opacity 0.4s ease;
+}
+.friend-marker-name {
+    margin-bottom: 3px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(15, 58, 82, 0.88);
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'Sora', sans-serif;
+    white-space: nowrap;
+    pointer-events: none;
 }
 .friend-marker-avatar {
     width: 38px;
@@ -198,26 +213,22 @@
     overflow: hidden;
     box-sizing: border-box;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    position: relative;
+    z-index: 1;
 }
 .friend-marker-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.friend-marker-name {
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-top: 3px;
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: rgba(15, 58, 82, 0.88);
-    color: white;
-    font-size: 10px;
-    font-weight: 700;
-    font-family: 'Sora', sans-serif;
-    white-space: nowrap;
-    pointer-events: none;
+.friend-marker-pointer {
+    width: 0;
+    height: 0;
+    margin-top: -2px;                  /* tucks under the photo's ring */
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 13px solid #f0a500;    /* same yellow as the ring */
+    filter: drop-shadow(0 2px 1px rgba(0, 0, 0, 0.25));
 }
 .friend-marker.is-stale { opacity: 0.45; }
 .friend-marker.is-stale .friend-marker-avatar { border-color: #9aa9b5; }
+.friend-marker.is-stale .friend-marker-pointer { border-top-color: #9aa9b5; }
 
 .friend-popup { display: flex; flex-direction: column; gap: 6px; font-family: 'Sora', sans-serif; min-width: 170px; }
 .friend-popup-name { font-size: 14px; font-weight: 700; color: #0f3a52; padding-right: 14px; }

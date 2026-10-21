@@ -6972,8 +6972,8 @@ function profileRenderAvatar(name, photoDataUrl) {
 function profileHandlePhoto(input) {
     const file = input.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-        showNotification('Photo must be under 2MB', 'error');
+    if (file.size > 10 * 1024 * 1024) {
+        showNotification('Photo must be under 10MB', 'error');
         return;
     }
     const reader = new FileReader();

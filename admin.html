@@ -3987,15 +3987,39 @@
     document.getElementById('profilePanel').classList.remove('active');
   }
 
+  // Crops to a centered square and saves as a small JPEG (same as the main app).
+  function resizeToSquareJpeg(dataUrl, size = 300) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const minSide = Math.min(img.width, img.height);
+        canvas.getContext('2d').drawImage(img,
+          (img.width - minSide) / 2, (img.height - minSide) / 2, minSide, minSide,
+          0, 0, size, size);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = () => reject(new Error('This image format is not supported. Please use JPG or PNG.'));
+      img.src = dataUrl;
+    });
+  }
+
   async function uploadProfilePhoto(input) {
     const file = input.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      showToast('Image too large (max 2MB)', 'error'); return;
+    if (file.size > 10 * 1024 * 1024) {
+      showToast('Image too large (max 10MB)', 'error'); return;
     }
     const reader = new FileReader();
     reader.onload = async function(e) {
-      const photo = e.target.result; // base64
+      let photo;
+      try {
+        photo = await resizeToSquareJpeg(e.target.result); // 300×300 JPEG, ~20–40 KB
+      } catch (err) {
+        showToast(err.message, 'error'); return;
+      }
       const s = getSession();
       if (!s) return;
       showToast('Uploading photo…', 'info');

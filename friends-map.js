@@ -141,7 +141,9 @@
         avatar.className = 'friend-marker-avatar';
         const label = document.createElement('div');
         label.className = 'friend-marker-name';
-        wrap.append(avatar, label);
+        const pointer = document.createElement('div');
+        pointer.className = 'friend-marker-pointer';   // its tip = the friend's exact position
+        wrap.append(label, avatar, pointer);
         fillMarkerElement(wrap, data);
 
         wrap.addEventListener('click', (e) => {
@@ -178,7 +180,7 @@
         let entry = st.markers.get(data.userId);
         if (!entry) {
             const el = buildMarkerElement(data);
-            const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+            const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
                 .setLngLat([data.lng, data.lat])
                 .addTo(map);
             entry = { marker, el, data, map };
@@ -252,7 +254,7 @@
         btn.addEventListener('click', () => navigateToFriend(entry.data));
         box.append(name, meta, btn);
 
-        st.popup = new maplibregl.Popup({ offset: 24, closeButton: true, maxWidth: '240px' })
+        st.popup = new maplibregl.Popup({ offset: 76, closeButton: true, maxWidth: '240px' })
             .setLngLat([entry.data.lng, entry.data.lat])
             .setDOMContent(box)
             .addTo(map);

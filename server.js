@@ -1322,8 +1322,8 @@ app.post("/api/auth/update-photo", async (req, res) => {
     if (!userId || !photo) {
         return res.status(400).json({ ok: false, error: "Missing userId or photo." });
     }
-    if (photo.length > 3 * 1024 * 1024) {
-        return res.status(413).json({ ok: false, error: "Photo too large (max ~2MB)." });
+    if (photo.length > 14 * 1024 * 1024) {
+        return res.status(413).json({ ok: false, error: "Photo too large (max 10MB)." });
     }
     if (!isSafeImageDataUrl(photo)) {
         return res.status(400).json({ ok: false, error: "Please upload a JPG, PNG, WEBP or GIF image." });
