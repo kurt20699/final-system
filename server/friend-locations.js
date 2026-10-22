@@ -96,9 +96,7 @@ module.exports = function registerFriendLocations(app, { friendsApi, activeUserC
     }
     const friendsNow = () => sharingFriends(me).map(id => publicLocation(id, live.get(id)));
 
-    const ALLOW_OFF_CAMPUS_FOR_TESTING = true; // ⚠️ set back to false before real use
-    if (!ALLOW_OFF_CAMPUS_FOR_TESTING &&
-        (lat < CAMPUS_BOX.south || lat > CAMPUS_BOX.north || lng < CAMPUS_BOX.west || lng > CAMPUS_BOX.east)) {
+    if (lat < CAMPUS_BOX.south || lat > CAMPUS_BOX.north || lng < CAMPUS_BOX.west || lng > CAMPUS_BOX.east) {
       stopSharing(me.userId, me.friendIds);
       return res.status(422).json({ ok: false, code: "OUTSIDE_CAMPUS", error: "Location is only shared inside the campus." });
     }
