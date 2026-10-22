@@ -178,6 +178,14 @@ function evaluateArrival(lat, lng, accuracy, destination) {
 
     const distance = calculateDistance([lat, lng], destCoords);
     const near = distance <= ARRIVAL_NEAR_RADIUS_M;
+
+    // Building routes end at the building's door (campus-router.js), which
+    // can be 20+ m from the center point in campus-data.js. Standing at the
+    // end of the route to this destination counts as arrived.
+    const routeEnd = window.RouteProgress?.routeEndFor(destination);
+    if (routeEnd && calculateDistance([lat, lng], routeEnd) <= getArrivalRadius(accuracy)) {
+        return { arrived: true, near: true, distance };
+    }
     const destBuilding = getDestinationBuilding(destination);
     const isRoom = destination.matchType === 'room' || !!destination.buildingName;
 
@@ -6623,9 +6631,14 @@ function msStartArrivalCheck(destination) {
         const result = evaluateArrival(lat, lng, accuracy, destination);
 
         // Manual "Arrived" button appears once the user is close.
+        // Arrived button: shown once 50 m of the ROUTE is left (measured along
+        // the route line — route-progress.js). Falls back to the straight-line
+        // rule when you're off the route or that file isn't loaded.
         const arrivedSection = document.getElementById('msArrivedSection');
         if (arrivedSection) {
-            arrivedSection.style.display = result.near ? 'block' : 'none';
+            const left = window.RouteProgress?.remainingMeters(lat, lng, state.currentRoute?.coordinates);
+            const near = left && !left.offRoute ? left.remaining <= ARRIVAL_NEAR_RADIUS_M : result.near;
+            arrivedSection.style.display = near ? 'block' : 'none';
         }
 
         positiveChecks = result.arrived ? positiveChecks + 1 : 0;
@@ -8125,15 +8138,15 @@ function add3DBuildingLayer() {
                 // ── UNNAMED / OUTDATED BUILDINGS ──
                 {
                     type: 'Feature',
-                    properties: { name: 'Building', height: 4, color: '#d9d0c9' },
+                    properties: { name: 'Criminology', height: 4, color: '#d9d0c9' },
                     geometry: {
                         type: 'Polygon',
                         coordinates: [[
-                            [119.9821517, 15.3190143],
-                            [119.9824517, 15.3189752],
-                            [119.9824265, 15.3188532],
-                            [119.9821346, 15.3188908],
-                            [119.9821517, 15.3190143]
+                            [119.9821549, 15.3190109],
+                            [119.9823068, 15.3189962],
+                            [119.9822634, 15.3186502],
+                            [119.9821064, 15.3186687],
+                            [119.9821549, 15.3190109]
                         ]]
                     }
                 },
@@ -8602,23 +8615,37 @@ function animate3DRouteDash(timestamp) {
     map3dState.dashAnimationFrame = requestAnimationFrame(animate3DRouteDash);
 }
 
+// Draws a 3D route line, or updates it in place if it's already on the map.
+// Updating (setData) keeps the old line visible until the new one is ready,
+// so the route never blinks out. Layers are also moved back on top, so
+// buildings re-added by a resync can't end up drawn over the route.
+function upsert3DLine(ml, sourceId, coordinates, layers) {
+    const data = { type: 'Feature', geometry: { type: 'LineString', coordinates } };
+    const source = ml.getSource(sourceId);
+    if (source) source.setData(data);
+    else ml.addSource(sourceId, { type: 'geojson', data });
+
+    layers.forEach(({ id, paint, dashed }) => {
+        if (!ml.getLayer(id)) {
+            ml.addLayer({
+                id, type: 'line', source: sourceId,
+                paint: dashed ? { ...paint, 'line-dasharray': [2, 3] } : paint
+            });
+        } else {
+            Object.entries(paint).forEach(([key, value]) => ml.setPaintProperty(id, key, value));
+            ml.moveLayer(id);
+        }
+    });
+}
+
 function sync3DRoute(options = {}) {
     const ml = map3dState.map;
     if (!ml || !state.currentRoute) return;
     const shouldFitBounds = options.fitBounds !== false;
 
-    // Remove old route layers if exists
-    if (ml.getSource('route-3d')) {
-        ml.removeLayer('route-3d-line');
-        ml.removeLayer('route-3d-dashed');
-        ml.removeSource('route-3d');
-    }
-    // ✅ Also clean up end layers on re-sync
-    if (ml.getSource('route-3d-end')) {
-        ml.removeLayer('route-3d-end-line');
-        ml.removeLayer('route-3d-end-dashed');
-        ml.removeSource('route-3d-end');
-    }
+    // The route layers are updated IN PLACE below (upsert3DLine) instead of
+    // being removed and re-added — removing them made the 3D route vanish for
+    // a moment on every 15 s background resync.
 
     const coords = state.currentRoute.coordinates.map(c => [c.lng, c.lat]);
     // ✅ Read the destination/type OFF THE ROUTE ITSELF, not from
@@ -8633,77 +8660,23 @@ function sync3DRoute(options = {}) {
         : state.isRoomNavigation;
     const routeColor = isRoom ? '#9c27b0' : '#2c5aa0';
 
-    ml.addSource('route-3d', {
-        type: 'geojson',
-        data: {
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: coords }
-        }
-    });
-
-    ml.addLayer({
-        id: 'route-3d-line',
-        type: 'line',
-        source: 'route-3d',
-        paint: {
-            'line-color': routeColor,
-            'line-width': 6,
-            'line-opacity': 0.85
-        }
-    });
-
-    ml.addLayer({
-        id: 'route-3d-dashed',
-        type: 'line',
-        source: 'route-3d',
-        paint: {
-            'line-color': '#ffffff',
-            'line-width': 6,
-            'line-opacity': 0.6,
-            'line-dasharray': [2, 3]
-        }
-    });
+    upsert3DLine(ml, 'route-3d', coords, [
+        { id: 'route-3d-line',   paint: { 'line-color': routeColor, 'line-width': 6, 'line-opacity': 0.85 } },
+        { id: 'route-3d-dashed', paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.6 }, dashed: true }
+    ]);
 
     // ✅ End dotted line — add source FIRST, then both layers
     if (activeDestination?.coords) {
         const lastCoord = coords[coords.length - 1];
         const destCoord = [activeDestination.coords[1], activeDestination.coords[0]];
-
-        ml.addSource('route-3d-end', {
-            type: 'geojson',
-            data: {
-                type: 'Feature',
-                geometry: {
-                    type: 'LineString',
-                    coordinates: [lastCoord, destCoord]
-                }
-            }
-        });
-
-        // Colored base layer
-        ml.addLayer({
-            id: 'route-3d-end-line',
-            type: 'line',
-            source: 'route-3d-end',
-            paint: {
-                'line-color': routeColor,
-                'line-width': 6,
-                'line-opacity': 1.0  // ✅ full opacity so blue is clearly visible
-            }
-        });
-
-        // White overlay on top
-        ml.addLayer({
-            id: 'route-3d-end-dashed',
-            type: 'line',
-            source: 'route-3d-end',
-            paint: {
-                'line-color': '#ffffff',
-                'line-width': 6,
-                'line-opacity': 0.5,  // ✅ reduced so blue base shows through
-                'line-dasharray': [2, 3]
-            }
-        });
+        upsert3DLine(ml, 'route-3d-end', [lastCoord, destCoord], [
+            { id: 'route-3d-end-line',   paint: { 'line-color': routeColor, 'line-width': 6, 'line-opacity': 1.0 } },
+            { id: 'route-3d-end-dashed', paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.5 }, dashed: true }
+        ]);
+    } else if (ml.getSource('route-3d-end')) {
+        ml.removeLayer('route-3d-end-line');
+        ml.removeLayer('route-3d-end-dashed');
+        ml.removeSource('route-3d-end');
     }
 
     // Restart the flowing dash animation
