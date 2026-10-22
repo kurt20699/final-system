@@ -861,6 +861,7 @@ function watchPositionOnce({ highAccuracy, waitMs, desiredAccuracy, goodEnoughAc
             if (settled) return;
             settled = true;
             clearTimeout(timeoutId);
+            clearTimeout(graceId);
             if (watchId !== null) navigator.geolocation.clearWatch(watchId);
             resolve(result);
         };
@@ -872,6 +873,13 @@ function watchPositionOnce({ highAccuracy, waitMs, desiredAccuracy, goodEnoughAc
                 finish({ position: null, error: { code: 3, message: 'Location request timed out. Please try again.' } });
             }
         }, waitMs);
+
+        // ✅ A good-enough reading that arrived BEFORE the grace period ended
+        // is accepted as soon as the grace period ends — instead of waiting
+        // for the full stage timeout if the phone sends no further readings.
+        const graceId = goodEnoughAccuracy ? setTimeout(() => {
+            if (best && best.coords.accuracy <= goodEnoughAccuracy) finish({ position: best, error: null });
+        }, goodEnoughAfterMs || 0) : null;
 
         try {
             watchId = navigator.geolocation.watchPosition(
@@ -911,7 +919,7 @@ function watchPositionOnce({ highAccuracy, waitMs, desiredAccuracy, goodEnoughAc
                     // itself isn't going to keep trying (handled by timeout).
                     if (best) return;
                 },
-                { enableHighAccuracy: highAccuracy, timeout: waitMs, maximumAge: highAccuracy ? 0 : 60000 }
+                { enableHighAccuracy: highAccuracy, timeout: waitMs, maximumAge: highAccuracy ? 15000 : 60000 }
             );
         } catch (err) {
             // Some browsers throw synchronously (rare, but seen on older
@@ -985,7 +993,7 @@ function acquireAccurateLocation({ desiredAccuracy = 25, maxWaitMs = 7000, onSta
                 // precision — otherwise a coarse early fix (common during
                 // GPS warm-up) gets accepted immediately instead of giving
                 // later stages a chance to refine it further.
-                if (lastResult.position.coords.accuracy <= desiredAccuracy) {
+                if (lastResult.position.coords.accuracy <= (stage.goodEnoughAccuracy || desiredAccuracy)) {
                     return { position: lastResult.position, error: null };
                 }
             }
@@ -3504,11 +3512,11 @@ function addBuildingFootprints() {
                 [15.3173787, 119.9839472]
             ],
             [
-                [15.3177853, 119.9818858],
-                [15.3178525, 119.9819593],
-                [15.3180204, 119.9817904],
-                [15.3179582, 119.9817195],
-                [15.3177853, 119.9818858]
+                [15.3180882, 119.9817972],
+                [15.3178265, 119.9818757],
+                [15.3178474, 119.9819600],
+                [15.3181109, 119.9818812],
+                [15.3180882, 119.9817972]
             ]
         ];
 
@@ -5454,6 +5462,9 @@ function toggleNav3D() {
             view3dBtn.textContent = '3D View';
             view3dBtn.classList.remove('is-active');
         }
+        // Recenter the 2D map, same as tapping the Center Map button.
+        // Short delay so it runs after exit3DMap() has resized the 2D map.
+        setTimeout(centerMap, 150);
     } else {
         enter3DMap();
         if (view3dBtn) {
@@ -7588,11 +7599,11 @@ function add3DBuildingLayer() {
                     geometry: {
                         type: 'Polygon',
                         coordinates: [[
-                            [119.9818858, 15.3177853],
-                            [119.9819593, 15.3178525],
-                            [119.9817904, 15.3180204],
-                            [119.9817195, 15.3179582],
-                            [119.9818858, 15.3177853]
+                            [119.9817972, 15.3180882],
+                            [119.9818757, 15.3178265],
+                            [119.9819600, 15.3178474],
+                            [119.9818812, 15.3181109],
+                            [119.9817972, 15.3180882]
                         ]]
                     }
                 },

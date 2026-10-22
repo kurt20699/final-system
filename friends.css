@@ -246,3 +246,13 @@
     cursor: pointer;
 }
 .friend-popup-btn:hover { background: #0f3a52; }
+
+/* Long lists scroll inside their own box, so Sign Out stays close by */
+.friends-rows {
+    max-height: 240px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+.friends-rows::-webkit-scrollbar { width: 6px; }
+.friends-rows::-webkit-scrollbar-thumb { background: #cfdde7; border-radius: 3px; }
