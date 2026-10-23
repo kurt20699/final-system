@@ -2202,7 +2202,10 @@ async function syncRoomsFromDB() {
             floor:      dbRoom.floor || '—',
             instructor: dbRoom.instructor || null,
             coords,
-            iconOffset: existing?.iconOffset || [0, 0]
+            // Use the nudge saved in the database (seed script, Admin Dashboard
+            // or RoomLayout), so saved room layouts aren't undone by older
+            // values in campus-data.js.
+            iconOffset: [Number(dbRoom.icon_offset_x) || 0, Number(dbRoom.icon_offset_y) || 0]
             };
         }).filter(r => r.coords); // only keep rooms with coordinates
 
@@ -2247,10 +2250,18 @@ async function resyncMapWithDatabase() {
             // Building still exists — re-render its room markers from the
             // freshly synced data so a deleted/added/moved room is reflected
             // immediately instead of only on the next manual toggle.
-            RoomMarkerManager.clear();
-            if (freshBuilding.rooms && freshBuilding.rooms.length > 0) {
+            // Only rebuild the icons if a room was actually added, removed or
+            // changed — rebuilding them on every 15 s poll made them blink.
+            const roomsKey = b => JSON.stringify((b.rooms || []).map(r =>
+                [r.id, r.name, r.floor, r.coords, r.iconOffset, r.instructor]));
+            if (roomsKey(freshBuilding) === roomsKey(state.rooms.activeBuilding)) {
                 state.rooms.activeBuilding = freshBuilding;
-                RoomMarkerManager.showRoomsForBuilding(freshBuilding);
+            } else {
+                RoomMarkerManager.clear();
+                if (freshBuilding.rooms && freshBuilding.rooms.length > 0) {
+                    state.rooms.activeBuilding = freshBuilding;
+                    RoomMarkerManager.showRoomsForBuilding(freshBuilding);
+                }
             }
             // If freshBuilding now has zero rooms, leave it cleared (already
             // done above) rather than re-showing an empty room panel.

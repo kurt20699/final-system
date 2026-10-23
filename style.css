@@ -2236,7 +2236,9 @@ path.dotted-end-line {
 }
 
 /* Room Marker Animations */
-.room-marker-wrapper {
+/* Animate the circle itself, not the wrapper — the wrapper holds each
+   room's position nudge, and animating it made icons jump into place. */
+.room-marker-icon {
     animation: roomMarkerAppear 0.3s ease-out;
 }
 

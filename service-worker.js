@@ -1,4 +1,4 @@
-const CACHE_NAME = 'prmsu-navigator-v18';
+const CACHE_NAME = 'prmsu-navigator-v19';
 const TILE_CACHE_NAME = 'prmsu-map-tiles-v6';
 
 // App shell files to cache immediately
@@ -19,6 +19,7 @@ const APP_SHELL = [
     './employee-announcement-widget.js', './campus-router.js', './campus-graph.json',
     './friends.js', './friends.css', './friends-map.js', './route-auto-popup.js','./route-progress.js', './labels-3d.js',
     './manifest.json',
+    './room-markers-zoom.js',
 ];
 
 // Install - cache app shell
